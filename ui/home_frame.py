@@ -48,6 +48,17 @@ class HomeFrame(ctk.CTkFrame):
         if card:
             card.update_result(result)
 
+    def update_conflict_result(self, result: ScanResult) -> None:
+        """主扫描完成后，冲突扫描阶段更新单张卡片"""
+        self._results[result.tool_id] = result
+        card = self._cards.get(result.tool_id)
+        if card:
+            card.update_result(result)
+
+    def get_conflict_count(self) -> int:
+        """返回检测到冲突的工具数量，供顶栏统计使用"""
+        return sum(1 for r in self._results.values() if r.has_conflict)
+
     # ── 构建 ────────────────────────────────────────────
 
     def _build(self) -> None:
@@ -89,7 +100,12 @@ class HomeFrame(ctk.CTkFrame):
         tab_row.pack(fill="x", padx=pad, pady=(0, 6))
 
         self._tab_btns: dict[str, ctk.CTkButton] = {}
-        tabs = [{"id": "all", "label": "全部"}] + list(CATEGORIES)
+        # 基础 tabs：全部 + 各分类 + 冲突筛选
+        tabs = (
+            [{"id": "all", "label": "全部"}]
+            + list(CATEGORIES)
+            + [{"id": "conflict", "label": "⚠ 冲突"}]
+        )
         for tab in tabs:
             tid = tab["id"]
             active = tid == "all"
@@ -120,6 +136,14 @@ class HomeFrame(ctk.CTkFrame):
         tools = self._filtered_tools()
         if not tools:
             self._show_empty()
+            return
+
+        # 冲突筛选视图：不分组，直接平铺
+        if self._active_cat == "conflict":
+            grid = ctk.CTkFrame(self._scroll, fg_color="transparent")
+            grid.pack(fill="x", padx=SPACING["card_pad"],
+                      pady=(SPACING["section_gap"], 4))
+            self._fill_grid(grid, tools)
             return
 
         grouped: dict[str, list[ToolDefinition]] = {}
@@ -243,7 +267,10 @@ class HomeFrame(ctk.CTkFrame):
 
     def _filtered_tools(self) -> list[ToolDefinition]:
         tools = self._all_tools
-        if self._active_cat != "all":
+        if self._active_cat == "conflict":
+            tools = [t for t in tools
+                     if self._results.get(t.id) and self._results[t.id].has_conflict]
+        elif self._active_cat != "all":
             tools = [t for t in tools if t.category == self._active_cat]
         if self._search_q:
             q = self._search_q.lower()

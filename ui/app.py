@@ -125,7 +125,7 @@ class App(ctk.CTk):
             text="",
             font=FONTS["body"],
             text_color=get_ctk_color("text_secondary"),
-            width=116,
+            width=160,
             anchor="e",
         )
         self._stats_label.pack(side="right", padx=(0, 12))
@@ -192,6 +192,7 @@ class App(ctk.CTk):
             on_progress=self._on_progress,
             on_complete=self._on_complete,
             on_error=self._on_error,
+            on_conflict_update=self._on_conflict_update,
         )
         self._scanner.start()
 
@@ -212,8 +213,17 @@ class App(ctk.CTk):
         self._scan_results = {r.tool_id: r for r in results}
         self._home.update_results(self._scan_results)
 
-        n = sum(1 for r in results if r.installed)
-        self._stats_label.configure(text=f"已安装  {n} / {len(results)}")
+        n_installed = sum(1 for r in results if r.installed)
+        total = len(results)
+        n_conflict = sum(1 for r in results if r.has_conflict)
+
+        if n_conflict > 0:
+            self._stats_label.configure(
+                text=f"已安装 {n_installed}/{total}  ⚠ {n_conflict} 冲突"
+            )
+        else:
+            self._stats_label.configure(text=f"已安装  {n_installed} / {total}")
+
         self._refresh_btn.configure(state="normal")
         self._prog_frame.grid_remove()
 
@@ -224,6 +234,26 @@ class App(ctk.CTk):
         self._stats_label.configure(text=f"出错: {msg[:32]}")
         self._refresh_btn.configure(state="normal")
         self._prog_frame.grid_remove()
+
+    # ── 冲突更新回调 ─────────────────────────────────────
+
+    def _on_conflict_update(self, result: ScanResult) -> None:
+        """多版本扫描完成后，从后台线程回调到主线程更新 UI。"""
+        self.after(0, lambda r=result: self._ui_conflict_update(r))
+
+    def _ui_conflict_update(self, result: ScanResult) -> None:
+        """在主线程中更新冲突结果并刷新顶栏计数。"""
+        self._scan_results[result.tool_id] = result
+        self._home.update_conflict_result(result)
+
+        # 更新顶栏冲突计数
+        n_conflict = self._home.get_conflict_count()
+        if n_conflict > 0:
+            installed = sum(1 for r in self._scan_results.values() if r.installed)
+            total = len(self._scan_results)
+            self._stats_label.configure(
+                text=f"已安装 {installed}/{total}  ⚠ {n_conflict} 冲突"
+            )
 
     # ── 卡片点击 / 主题 ──────────────────────────────────
 

@@ -13,7 +13,9 @@ class ToolCard(ctk.CTkFrame):
     固定尺寸卡片:
       [彩条] [工具名]
              [版本 / 未检测到]
+             [⚠ 冲突]（仅当 has_conflict）
     彩条颜色 = 分类色（已安装）或边框色（未安装）。
+    冲突时边框颜色为 warning；选中时切换为 border_accent。
     """
 
     def __init__(
@@ -48,6 +50,15 @@ class ToolCard(ctk.CTkFrame):
 
     def _build(self) -> None:
         installed = bool(self._result and self._result.installed)
+        has_conflict = bool(self._result and self._result.has_conflict)
+
+        # 决定边框颜色
+        if has_conflict:
+            border_col = get_ctk_color("warning")
+        elif self._selected:
+            border_col = get_ctk_color("border_accent")
+        else:
+            border_col = get_ctk_color("border_muted")
 
         # 左侧分类彩条
         bar_color = (
@@ -83,6 +94,16 @@ class ToolCard(ctk.CTkFrame):
                 text_color=get_ctk_color("success"),
                 anchor="w",
             ).pack(fill="x", pady=(2, 0))
+
+            # 冲突标记（已安装 + 有冲突时显示）
+            if has_conflict:
+                ctk.CTkLabel(
+                    body,
+                    text="⚠ 冲突",
+                    font=FONTS["small"],
+                    text_color=get_ctk_color("warning"),
+                    anchor="w",
+                ).pack(fill="x", pady=(1, 0))
         else:
             ctk.CTkLabel(
                 body,
@@ -91,6 +112,9 @@ class ToolCard(ctk.CTkFrame):
                 text_color=get_ctk_color("text_muted"),
                 anchor="w",
             ).pack(fill="x", pady=(2, 0))
+
+        # 应用边框颜色（覆盖 __init__ 中的默认值）
+        self.configure(border_color=border_col)
 
     # ── 事件 ─────────────────────────────────────────────
 
@@ -118,14 +142,23 @@ class ToolCard(ctk.CTkFrame):
 
     def set_selected(self, v: bool) -> None:
         self._selected = v
+        has_conflict = bool(self._result and self._result.has_conflict)
         if v:
-            self.configure(fg_color=get_ctk_color("bg_card_hover"),
-                           border_color=get_ctk_color("border_accent"),
-                           border_width=2)
+            self.configure(
+                fg_color=get_ctk_color("bg_card_hover"),
+                border_color=get_ctk_color("border_accent"),
+                border_width=2,
+            )
         else:
-            self.configure(fg_color=get_ctk_color("bg_card"),
-                           border_color=get_ctk_color("border_muted"),
-                           border_width=1)
+            # 非选中时：冲突卡片恢复 warning 边框，否则恢复默认
+            self.configure(
+                fg_color=get_ctk_color("bg_card"),
+                border_color=(
+                    get_ctk_color("warning") if has_conflict
+                    else get_ctk_color("border_muted")
+                ),
+                border_width=1,
+            )
 
     def update_result(self, result: ScanResult | None) -> None:
         self._result = result

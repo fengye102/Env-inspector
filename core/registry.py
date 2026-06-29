@@ -8,16 +8,28 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class VersionEntry:
+    """某工具一个具体版本的信息"""
+    version: str
+    executable_path: str
+    install_dir: str
+    is_active: bool = False
+
+
+@dataclass
 class ScanResult:
     """单次工具扫描的结果"""
     tool_id: str
     installed: bool
     version: str | None = None
     raw_output: str | None = None
-    install_path: str | None = None
+    executable_path: str | None = None   # 可执行文件完整路径
+    install_dir: str | None = None       # 安装根目录
     extra_info: str | None = None
     error: str | None = None
     scan_duration_ms: int = 0
+    all_versions: list[VersionEntry] = field(default_factory=list)
+    has_conflict: bool = False
 
 
 @dataclass
@@ -33,6 +45,7 @@ class ToolDefinition:
     common_cmds: list[dict] = field(default_factory=list)
     registry_keys: list[str] = field(default_factory=list)
     fallback_paths: list[str] = field(default_factory=list)
+    multi_version_paths: list[str] = field(default_factory=list)
 
 
 # ── 分类元数据 ─────────────────────────────────────────────
@@ -82,6 +95,11 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Python312\python.exe",
                 r"C:\Program Files\Python311\python.exe",
             ],
+            multi_version_paths=[
+                r"C:\Python3*",
+                r"C:\Program Files\Python3*",
+                r"%LOCALAPPDATA%\Programs\Python\Python3*",
+            ],
         ),
         ToolDefinition(
             id="java",
@@ -104,6 +122,11 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Java\*\bin\java.exe",
                 r"C:\Program Files (x86)\Java\*\bin\java.exe",
             ],
+            multi_version_paths=[
+                r"C:\Program Files\Java\*",
+                r"C:\Program Files\Eclipse Adoptium\*",
+                r"C:\Program Files\Microsoft\jdk-*",
+            ],
         ),
         ToolDefinition(
             id="nodejs",
@@ -123,6 +146,10 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Program Files\nodejs\node.exe",
                 r"C:\Program Files (x86)\nodejs\node.exe",
+            ],
+            multi_version_paths=[
+                r"C:\Program Files\nodejs",
+                r"%APPDATA%\nvm\v*",
             ],
         ),
         ToolDefinition(
@@ -144,6 +171,10 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Go\bin\go.exe",
                 r"C:\Program Files\Go\bin\go.exe",
             ],
+            multi_version_paths=[
+                r"C:\Go",
+                r"C:\Program Files\Go",
+            ],
         ),
         ToolDefinition(
             id="rust",
@@ -160,8 +191,8 @@ def _build_tools() -> list[ToolDefinition]:
             registry_keys=[],
             fallback_paths=[
                 r"C:\Users\%USERNAME%\.cargo\bin\rustc.exe",
-                r"C:\Users\%USERNAME%\.rustup\toolchains\*\bin\rustc.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="ruby",
@@ -179,6 +210,10 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Ruby*\bin\ruby.exe",
                 r"C:\Program Files\Ruby*\bin\ruby.exe",
+            ],
+            multi_version_paths=[
+                r"C:\Ruby*",
+                r"C:\Program Files\Ruby*",
             ],
         ),
         ToolDefinition(
@@ -202,6 +237,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\PHP\php.exe",
                 r"C:\Program Files (x86)\PHP\php.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="dotnet",
@@ -221,6 +257,7 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Program Files\dotnet\dotnet.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 包管理器 ──────────────────────────────────────
@@ -238,6 +275,7 @@ def _build_tools() -> list[ToolDefinition]:
             ],
             registry_keys=[],
             fallback_paths=[],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="npm",
@@ -253,6 +291,7 @@ def _build_tools() -> list[ToolDefinition]:
             ],
             registry_keys=[],
             fallback_paths=[],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="yarn",
@@ -268,6 +307,7 @@ def _build_tools() -> list[ToolDefinition]:
             ],
             registry_keys=[],
             fallback_paths=[],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="pnpm",
@@ -283,6 +323,7 @@ def _build_tools() -> list[ToolDefinition]:
             ],
             registry_keys=[],
             fallback_paths=[],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="maven",
@@ -301,6 +342,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Apache\Maven\bin\mvn.cmd",
                 r"C:\Tools\apache-maven-*\bin\mvn.cmd",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="gradle",
@@ -319,6 +361,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Gradle\*\bin\gradle.bat",
                 r"C:\Tools\gradle-*\bin\gradle.bat",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="cargo",
@@ -336,6 +379,7 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Users\%USERNAME%\.cargo\bin\cargo.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 版本控制 ──────────────────────────────────────
@@ -358,6 +402,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Git\bin\git.exe",
                 r"C:\Program Files (x86)\Git\bin\git.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="gh",
@@ -376,6 +421,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\GitHub CLI\gh.exe",
                 r"C:\Program Files (x86)\GitHub CLI\gh.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 容器 ──────────────────────────────────────────
@@ -397,8 +443,8 @@ def _build_tools() -> list[ToolDefinition]:
             ],
             fallback_paths=[
                 r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
-                r"C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="kubectl",
@@ -416,6 +462,7 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Program Files\Kubernetes\*\bin\kubectl.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 数据库 ────────────────────────────────────────
@@ -439,6 +486,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\MySQL\MySQL Server *\bin\mysql.exe",
                 r"C:\Program Files (x86)\MySQL\MySQL Server *\bin\mysql.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="postgresql",
@@ -458,6 +506,7 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Program Files\PostgreSQL\*\bin\psql.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="redis",
@@ -474,8 +523,8 @@ def _build_tools() -> list[ToolDefinition]:
             registry_keys=[],
             fallback_paths=[
                 r"C:\Program Files\Redis\redis-cli.exe",
-                r"C:\Program Files\Redis\redis-server.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="mongodb",
@@ -492,8 +541,8 @@ def _build_tools() -> list[ToolDefinition]:
             registry_keys=[],
             fallback_paths=[
                 r"C:\Program Files\MongoDB\Server\*\bin\mongod.exe",
-                r"C:\Program Files\MongoDB\Server\*\bin\mongosh.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 云工具 ────────────────────────────────────────
@@ -514,6 +563,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Amazon\AWSCLIV2\aws.exe",
                 r"C:\Program Files (x86)\Amazon\AWSCLIV2\aws.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 构建工具 ──────────────────────────────────────
@@ -535,6 +585,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files (x86)\Git\usr\bin\make.exe",
                 r"C:\msys64\usr\bin\make.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="cmake",
@@ -553,6 +604,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\CMake\bin\cmake.exe",
                 r"C:\Program Files (x86)\CMake\bin\cmake.exe",
             ],
+            multi_version_paths=[],
         ),
 
         # ── 运行时/其他 ──────────────────────────────────
@@ -573,6 +625,7 @@ def _build_tools() -> list[ToolDefinition]:
                 r"C:\Program Files\Flutter\bin\flutter.exe",
                 r"C:\Users\%USERNAME%\flutter\bin\flutter.exe",
             ],
+            multi_version_paths=[],
         ),
         ToolDefinition(
             id="wsl",
@@ -590,6 +643,7 @@ def _build_tools() -> list[ToolDefinition]:
             fallback_paths=[
                 r"C:\Windows\System32\wsl.exe",
             ],
+            multi_version_paths=[],
         ),
     ]
 
@@ -619,10 +673,3 @@ def get_tool(tool_id: str) -> ToolDefinition | None:
 def get_tools_by_category(category: str) -> list[ToolDefinition]:
     """获取指定分类下的所有工具"""
     return [t for t in get_all_tools() if t.category == category]
-
-
-def get_category_tool_count(category: str) -> tuple[int, int]:
-    """返回 (已安装数, 总数) 用于分类标题"""
-    # 注意:此函数只返回总数,已安装数由外部传入
-    tools = get_tools_by_category(category)
-    return len([t for t in tools]), len(tools)

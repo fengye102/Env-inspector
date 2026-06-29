@@ -12,9 +12,17 @@ from typing import Optional
 
 from core.registry import ScanResult, ToolDefinition
 
-# 超时控制
 CMD_TIMEOUT_MS = 5000
 CMD_TIMEOUT_S = CMD_TIMEOUT_MS / 1000.0
+
+
+def infer_install_dir(executable_path: str) -> str:
+    """从可执行文件路径推断安装根目录。"""
+    path = Path(executable_path)
+    parent = path.parent
+    if parent.name.lower() in ("bin", "scripts", "cmd"):
+        return str(parent.parent)
+    return str(parent)
 
 
 def detect_tool(tool: ToolDefinition) -> ScanResult:
@@ -27,49 +35,52 @@ def detect_tool(tool: ToolDefinition) -> ScanResult:
 
 
 def _do_detect(tool: ToolDefinition) -> ScanResult:
-    """实际检测逻辑,返回填充基本字段的 ScanResult."""
     # ————— 1. 执行版本命令 (PATH 查找) —————
     for cmd in tool.commands:
         ver, raw, exe_path = _run_command(cmd)
         if ver is not None:
+            install_dir = infer_install_dir(exe_path) if exe_path else None
             return ScanResult(
                 tool_id=tool.id,
                 installed=True,
                 version=ver,
                 raw_output=raw,
-                install_path=exe_path,
+                executable_path=exe_path,
+                install_dir=install_dir,
             )
-        # --version 可能写 stderr（如 java）,再试一次 stderr 模式
         ver, raw, exe_path = _run_command(cmd, prefer_stderr=True)
         if ver is not None:
+            install_dir = infer_install_dir(exe_path) if exe_path else None
             return ScanResult(
                 tool_id=tool.id,
                 installed=True,
                 version=ver,
                 raw_output=raw,
-                install_path=exe_path,
+                executable_path=exe_path,
+                install_dir=install_dir,
             )
 
     # ————— 2. Windows 注册表查找 —————
     for reg_path in tool.registry_keys:
         exe_path = _find_in_registry(reg_path)
         if exe_path:
-            # 找到路径后再尝试执行确认版本
             ver, raw = _run_executable(exe_path, tool.commands[0] if tool.commands else None)
+            install_dir = infer_install_dir(exe_path)
             if ver:
                 return ScanResult(
                     tool_id=tool.id,
                     installed=True,
                     version=ver,
                     raw_output=raw,
-                    install_path=exe_path,
+                    executable_path=exe_path,
+                    install_dir=install_dir,
                 )
             return ScanResult(
                 tool_id=tool.id,
                 installed=True,
                 version=None,
-                raw_output=None,
-                install_path=exe_path,
+                executable_path=exe_path,
+                install_dir=install_dir,
             )
 
     # ————— 3. fallback_paths 固定路径兜底 —————
@@ -79,20 +90,22 @@ def _do_detect(tool: ToolDefinition) -> ScanResult:
         if p.exists():
             exe_str = str(p)
             ver, raw = _run_executable(exe_str, tool.commands[0] if tool.commands else None)
+            install_dir = infer_install_dir(exe_str)
             if ver:
                 return ScanResult(
                     tool_id=tool.id,
                     installed=True,
                     version=ver,
                     raw_output=raw,
-                    install_path=exe_str,
+                    executable_path=exe_str,
+                    install_dir=install_dir,
                 )
             return ScanResult(
                 tool_id=tool.id,
                 installed=True,
                 version=None,
-                raw_output=None,
-                install_path=exe_str,
+                executable_path=exe_str,
+                install_dir=install_dir,
             )
 
     # ————— 全部失败 —————
@@ -104,15 +117,12 @@ def _do_detect(tool: ToolDefinition) -> ScanResult:
 
 
 def _run_command(cmd: str, prefer_stderr: bool = False) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """执行命令，返回 (version, raw_output, exe_path)。
-    使用 shell=True 以便在 Windows 上正确执行 .cmd / .bat 脚本
-    （npm、mvn、gradle 等工具均以脚本形式存在，直接调用会 FileNotFoundError）。
-    """
+    """执行命令，返回 (version, raw_output, exe_path)。"""
     try:
-        cmd_name = cmd.split()[0]   # 取首个词用于 where 定位
+        cmd_name = cmd.split()[0]
         proc = subprocess.run(
             cmd,
-            shell=True,             # 让 cmd.exe 处理 .cmd/.bat 脚本
+            shell=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -121,7 +131,6 @@ def _run_command(cmd: str, prefer_stderr: bool = False) -> tuple[Optional[str], 
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         output = proc.stderr if prefer_stderr else proc.stdout
-        # java -version 写入 stderr，自动补偿
         if not output and proc.stderr:
             output = proc.stderr
         if not output and proc.stdout:
@@ -129,7 +138,7 @@ def _run_command(cmd: str, prefer_stderr: bool = False) -> tuple[Optional[str], 
 
         version = _parse_version(output) if output else None
         if version is None:
-            return None, None, None   # 命令不存在或输出无版本号，早期返回
+            return None, None, None
 
         exe_path = _locate_exe(cmd_name)
         return version, (output or "").strip()[:500], exe_path
@@ -142,12 +151,11 @@ def _run_command(cmd: str, prefer_stderr: bool = False) -> tuple[Optional[str], 
 def _find_in_registry(reg_path: str) -> Optional[str]:
     """在 Windows 注册表中查找路径,返回找到的可执行文件路径."""
     try:
-        # 格式: HKLM\SOFTWARE\...\value_name 或 HKLM\SOFTWARE\...
         if "\\" not in reg_path:
             return None
 
         if reg_path.upper().startswith("HKLM"):
-            key_path = reg_path[4:]  # 去掉 HKLM
+            key_path = reg_path[4:]
             root = winreg.HKEY_LOCAL_MACHINE
         elif reg_path.upper().startswith("HKCU"):
             key_path = reg_path[4:]
@@ -160,20 +168,16 @@ def _find_in_registry(reg_path: str) -> Optional[str]:
             root = winreg.HKEY_LOCAL_MACHINE
 
         key_path = key_path.strip("\\")
-        # 分割出 key 和 value name
         *key_parts, value_name = key_path.rsplit("\\", 1)
 
         with winreg.OpenKey(root, "\\".join(key_parts)) as key:
             value, _ = winreg.QueryValueEx(key, value_name)
             if isinstance(value, str) and value:
-                # 可能是 InstallPath 的子目录
                 exe_dir = os.path.expandvars(value)
-                # 尝试找常见 exe 名称
                 for exe_name in _guess_exe_names(key_path):
                     candidate = os.path.join(exe_dir, exe_name)
                     if os.path.isfile(candidate):
                         return candidate
-                # 直接返回目录
                 return exe_dir
     except (FileNotFoundError, OSError, ValueError):
         pass
@@ -181,8 +185,6 @@ def _find_in_registry(reg_path: str) -> Optional[str]:
 
 
 def _guess_exe_names(key_path: str) -> list[str]:
-    """根据注册表路径猜测可能的 exe 名称."""
-    # 从路径中提取关键词
     parts = key_path.lower().split("\\")
     keywords = []
     for p in parts:
@@ -190,10 +192,8 @@ def _guess_exe_names(key_path: str) -> list[str]:
             keywords.append(p)
     if not keywords:
         return []
-    # 以最后一个有意义的名字作为 exe 名
     name = keywords[-1].replace(" ", "")
     candidates = [name, f"{name}.exe"]
-    # 一些常见映射
     mapping = {
         "nodejs": "node.exe",
         "python": "python.exe",
@@ -208,14 +208,12 @@ def _guess_exe_names(key_path: str) -> list[str]:
 
 
 def _run_executable(exe_path: str, sample_cmd: str | None) -> tuple[Optional[str], Optional[str]]:
-    """对已知完整路径的可执行文件尝试执行版本命令。
-    使用列表传参以正确处理路径中的空格（如 C:\\Program Files\\...）。
-    """
+    """对已知完整路径的可执行文件尝试执行版本命令。"""
     if not sample_cmd:
         cmd_args = [exe_path, "--version"]
     else:
         parts = sample_cmd.split()
-        parts[0] = exe_path          # 将命令名替换为完整路径
+        parts[0] = exe_path
         cmd_args = parts
     try:
         proc = subprocess.run(
@@ -256,16 +254,13 @@ def _locate_exe(cmd_name: str) -> Optional[str]:
 
 
 def _parse_version(raw: str) -> Optional[str]:
-    """从命令输出中提取版本号，找不到版本模式则返回 None（不降级为错误文本）。"""
+    """从命令输出中提取版本号，找不到版本模式则返回 None。"""
     if not raw:
         return None
-    # 优先匹配 x.y.z 或 x.y.z-tag
     match = re.search(r"(\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9]+)?)", raw)
     if match:
         return match.group(1)
-    # 降级匹配 x.y
     match = re.search(r"(\d+\.\d+)", raw)
     if match:
         return match.group(1)
-    # 找不到版本号：说明是错误信息或无关输出，返回 None
     return None

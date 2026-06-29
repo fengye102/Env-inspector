@@ -4,7 +4,7 @@ from __future__ import annotations
 import webbrowser
 import customtkinter as ctk
 
-from core.registry import ScanResult, ToolDefinition
+from core.registry import ScanResult, ToolDefinition, VersionEntry
 from ui.theme import FONTS, SPACING, get_category_ctk_color, get_ctk_color
 
 
@@ -80,14 +80,24 @@ class DetailPanel(ctk.CTkFrame):
         body = ctk.CTkFrame(header, fg_color="transparent")
         body.pack(fill="x", padx=pad, pady=(10, pad))
 
-        # 工具名 + 状态
+        # 工具名 + 状态图标
         name_row = ctk.CTkFrame(body, fg_color="transparent")
         name_row.pack(fill="x")
 
-        icon_col = get_ctk_color("success") if installed else get_ctk_color("text_muted")
+        # 冲突时显示警告图标，否则正常安装/未安装图标
+        if installed and result and result.has_conflict:
+            icon_text = "⚠"
+            icon_col = get_ctk_color("warning")
+        elif installed:
+            icon_text = "✓"
+            icon_col = get_ctk_color("success")
+        else:
+            icon_text = "✗"
+            icon_col = get_ctk_color("text_muted")
+
         ctk.CTkLabel(
             name_row,
-            text="✓" if installed else "✗",
+            text=icon_text,
             font=("Segoe UI", 14, "bold"),
             text_color=icon_col, width=20,
         ).pack(side="left")
@@ -100,15 +110,26 @@ class DetailPanel(ctk.CTkFrame):
         ).pack(side="left", padx=(4, 0))
 
         # 状态标签 · 版本
-        status_parts = ["已安装" if installed else "未检测到"]
+        if installed and result and result.has_conflict:
+            status_text = "版本冲突"
+            status_col = get_ctk_color("warning")
+        elif installed:
+            status_text = "已安装"
+            status_col = get_ctk_color("success")
+        else:
+            status_text = "未检测到"
+            status_col = get_ctk_color("text_muted")
+
+        status_parts = [status_text]
         if installed and result and result.version:
             status_parts.append(result.version)
+
         ctk.CTkLabel(
             body,
             text=" · ".join(status_parts),
             font=FONTS["mono_sm"] if (installed and result and result.version)
                  else FONTS["small"],
-            text_color=icon_col,
+            text_color=status_col,
             anchor="w",
         ).pack(fill="x", pady=(3, 0))
 
@@ -131,8 +152,16 @@ class DetailPanel(ctk.CTkFrame):
         info: list[tuple[str, str]] = []
         if result and result.version:
             info.append(("版本", result.version))
-        if result and result.install_path:
-            info.append(("路径", result.install_path))
+        if result and result.install_dir:
+            info.append(("安装位置", result.install_dir))
+        # 仅在 executable_path 与 install_dir 不同时才单独展示
+        if result and result.executable_path and result.install_dir:
+            import os as _os
+            exe_dir = _os.path.dirname(result.executable_path)
+            if _os.path.normcase(exe_dir) != _os.path.normcase(result.install_dir):
+                info.append(("可执行文件", result.executable_path))
+        elif result and result.executable_path and not result.install_dir:
+            info.append(("可执行文件", result.executable_path))
         if result and result.scan_duration_ms:
             info.append(("耗时", f"{result.scan_duration_ms} ms"))
 
@@ -140,6 +169,10 @@ class DetailPanel(ctk.CTkFrame):
             sec = self._section(scroll, "基本信息")
             for lbl, val in info:
                 self._info_row(sec, lbl, val)
+
+        # ── 冲突警告节 ───────────────────────────────────
+        if result and result.has_conflict and result.all_versions:
+            self._conflict_section(scroll, result.all_versions)
 
         # ── 常用命令 ─────────────────────────────────────
         if tool.common_cmds:
@@ -177,6 +210,98 @@ class DetailPanel(ctk.CTkFrame):
         content.pack(fill="x", padx=0, pady=(4, pad // 2))
         return content
 
+    def _conflict_section(self, parent, versions: list[VersionEntry]) -> None:
+        """渲染多版本冲突警告节。"""
+        pad = SPACING["card_pad"]
+        outer = ctk.CTkFrame(
+            parent,
+            fg_color=get_ctk_color("bg_card"),
+            corner_radius=SPACING["card_radius"],
+        )
+        outer.pack(fill="x", padx=pad, pady=(pad, 0))
+
+        # 节标题行（警告色）
+        title_row = ctk.CTkFrame(outer, fg_color="transparent")
+        title_row.pack(fill="x", padx=pad, pady=(pad - 2, 0))
+
+        ctk.CTkLabel(
+            title_row,
+            text="⚠  检测到多个版本",
+            font=FONTS["body"],
+            text_color=get_ctk_color("warning"),
+            anchor="w",
+        ).pack(side="left")
+
+        n_active = sum(1 for v in versions if v.is_active)
+        ctk.CTkLabel(
+            title_row,
+            text=f"共 {len(versions)} 个",
+            font=FONTS["small"],
+            text_color=get_ctk_color("text_muted"),
+            anchor="e",
+        ).pack(side="right")
+
+        # 分隔线
+        ctk.CTkFrame(outer, height=1,
+                     fg_color=get_ctk_color("separator")).pack(
+            fill="x", padx=pad, pady=(4, 0)
+        )
+
+        # 每个版本条目
+        content = ctk.CTkFrame(outer, fg_color="transparent")
+        content.pack(fill="x", padx=0, pady=(4, pad // 2))
+
+        for entry in versions:
+            self._version_entry_row(content, entry)
+
+    def _version_entry_row(self, parent, entry: VersionEntry) -> None:
+        """渲染单个 VersionEntry 行：版本号 + 安装目录 + 是否生效。"""
+        pad = SPACING["card_pad"]
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=pad, pady=(0, 5))
+
+        # 是否生效标记（左侧圆点）
+        dot_col = get_ctk_color("success") if entry.is_active else get_ctk_color("border")
+        ctk.CTkLabel(
+            row,
+            text="●",
+            font=("Segoe UI", 8),
+            text_color=dot_col,
+            width=14,
+        ).pack(side="left")
+
+        # 版本号
+        ctk.CTkLabel(
+            row,
+            text=entry.version,
+            font=FONTS["mono_sm"],
+            text_color=get_ctk_color("accent") if entry.is_active
+                       else get_ctk_color("text_primary"),
+            width=68,
+            anchor="w",
+        ).pack(side="left")
+
+        # 安装目录（截断显示）
+        dir_label = ctk.CTkLabel(
+            row,
+            text=entry.install_dir,
+            font=FONTS["mono_sm"],
+            text_color=get_ctk_color("text_muted"),
+            anchor="w",
+            wraplength=SPACING["panel_w"] - 140,
+        )
+        dir_label.pack(side="left", fill="x", expand=True)
+
+        # 当前生效标签
+        if entry.is_active:
+            ctk.CTkLabel(
+                row,
+                text="当前生效",
+                font=FONTS["small"],
+                text_color=get_ctk_color("success"),
+                anchor="e",
+            ).pack(side="right")
+
     def _info_row(self, parent, label: str, value: str) -> None:
         pad = SPACING["card_pad"]
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -185,14 +310,14 @@ class DetailPanel(ctk.CTkFrame):
             row, text=label,
             font=FONTS["small"],
             text_color=get_ctk_color("text_muted"),
-            width=48, anchor="w",
+            width=56, anchor="w",
         ).pack(side="left")
         ctk.CTkLabel(
             row, text=value,
             font=FONTS["mono_sm"],
             text_color=get_ctk_color("text_primary"),
             anchor="w",
-            wraplength=SPACING["panel_w"] - 76,
+            wraplength=SPACING["panel_w"] - 84,
         ).pack(side="left", fill="x", expand=True)
 
     def _cmd_row(self, parent, item: dict) -> None:
