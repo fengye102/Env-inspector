@@ -95,9 +95,16 @@ class HomeFrame(ctk.CTkFrame):
             placeholder_text_color=get_ctk_color("text_muted"),
         ).pack(side="left")
 
-        # ── 第二行：分类 Tab（独占一行，铺开不截断）──────────
-        tab_row = ctk.CTkFrame(self, fg_color="transparent")
-        tab_row.pack(fill="x", padx=pad, pady=(0, 6))
+        # ── 第二行：分类 Tab（可横向滚动，防止截断）──────────
+        tab_row = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            orientation="horizontal",
+            height=46,
+            scrollbar_button_color=get_ctk_color("border"),
+            scrollbar_button_hover_color=get_ctk_color("text_muted"),
+        )
+        tab_row.pack(fill="x", padx=pad, pady=(0, 2))
 
         self._tab_btns: dict[str, ctk.CTkButton] = {}
         # 基础 tabs：全部 + 各分类 + 冲突筛选
