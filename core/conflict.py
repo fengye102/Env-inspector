@@ -10,12 +10,14 @@ from __future__ import annotations
 import glob
 import os
 import subprocess
+import time
 
 from core.detector import _parse_version, infer_install_dir
 from core.registry import ScanResult, ToolDefinition, VersionEntry
 
-_CONFLICT_CMD_TIMEOUT = 3   # 单个版本命令超时（秒）
-_MAX_GLOB_RESULTS = 20      # glob 展开结果上限
+_CONFLICT_CMD_TIMEOUT = 3        # 单个版本命令超时（秒）
+_CONFLICT_TOOL_TIMEOUT_TOTAL = 10.0  # 单工具多版本扫描总超时（秒，见 CLAUDE.md §九）
+_MAX_GLOB_RESULTS = 20           # glob 展开结果上限
 
 
 # ── 公开接口 ──────────────────────────────────────────────────
@@ -70,9 +72,16 @@ def detect_all_versions(tool_def: ToolDefinition) -> list[VersionEntry]:
             unique.append(c)
 
     # ── 逐一执行版本命令，构建 VersionEntry ──
+    # 总超时 _CONFLICT_TOOL_TIMEOUT_TOTAL 秒，临近截止则缩短单命令超时，
+    # 保证单工具整体不超时（见 CLAUDE.md §九）。
+    start = time.monotonic()
     entries: list[VersionEntry] = []
     for exe_path in unique:
-        version = _run_version_cmd(exe_path, version_args)
+        remaining = _CONFLICT_TOOL_TIMEOUT_TOTAL - (time.monotonic() - start)
+        if remaining <= 0:
+            break
+        timeout = min(_CONFLICT_CMD_TIMEOUT, remaining)
+        version = _run_version_cmd(exe_path, version_args, timeout=timeout)
         if version is None:
             continue
         is_active = (
@@ -103,7 +112,9 @@ def update_result_with_versions(
     """
     all_versions = detect_all_versions(tool_def)
     result.all_versions = all_versions
-    result.has_conflict = len(all_versions) > 1
+    # 规范 §九:冲突 = 存在 2 个及以上不同版本（按版本号去重，非按路径）
+    distinct_versions = {e.version for e in all_versions}
+    result.has_conflict = len(distinct_versions) > 1
     return result
 
 
@@ -162,9 +173,9 @@ def _find_exe_in_dir(dir_path: str, exe_name: str) -> str | None:
     return None
 
 
-def _run_version_cmd(exe_path: str, args: list[str]) -> str | None:
+def _run_version_cmd(exe_path: str, args: list[str], timeout: float = _CONFLICT_CMD_TIMEOUT) -> str | None:
     """
-    对指定 exe 执行版本命令（3 秒超时），
+    对指定 exe 执行版本命令（默认 3 秒超时），
     返回解析后的版本号字符串；失败返回 None。
     """
     try:
@@ -174,7 +185,7 @@ def _run_version_cmd(exe_path: str, args: list[str]) -> str | None:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=_CONFLICT_CMD_TIMEOUT,
+            timeout=timeout,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         output = proc.stdout or proc.stderr

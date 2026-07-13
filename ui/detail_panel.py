@@ -1,6 +1,7 @@
 """右侧详情面板"""
 
 from __future__ import annotations
+import os
 import webbrowser
 import customtkinter as ctk
 
@@ -156,9 +157,8 @@ class DetailPanel(ctk.CTkFrame):
             info.append(("安装位置", result.install_dir))
         # 仅在 executable_path 与 install_dir 不同时才单独展示
         if result and result.executable_path and result.install_dir:
-            import os as _os
-            exe_dir = _os.path.dirname(result.executable_path)
-            if _os.path.normcase(exe_dir) != _os.path.normcase(result.install_dir):
+            exe_dir = os.path.dirname(result.executable_path)
+            if os.path.normcase(exe_dir) != os.path.normcase(result.install_dir):
                 info.append(("可执行文件", result.executable_path))
         elif result and result.executable_path and not result.install_dir:
             info.append(("可执行文件", result.executable_path))
@@ -174,11 +174,18 @@ class DetailPanel(ctk.CTkFrame):
         if result and result.has_conflict and result.all_versions:
             self._conflict_section(scroll, result.all_versions)
 
+        # ── 额外信息（pip 全局包 / Docker 容器数等） ──────
+        if result and result.extra_info:
+            self._extra_info_section(scroll, result.extra_info)
+
         # ── 常用命令 ─────────────────────────────────────
         if tool.common_cmds:
             sec = self._section(scroll, "常用命令")
             for item in tool.common_cmds:
                 self._cmd_row(sec, item)
+
+        # ── 快捷操作 ─────────────────────────────────────
+        self._actions_row(scroll, tool, result)
 
         self._docs_btn(scroll, tool)
 
@@ -232,7 +239,6 @@ class DetailPanel(ctk.CTkFrame):
             anchor="w",
         ).pack(side="left")
 
-        n_active = sum(1 for v in versions if v.is_active)
         ctk.CTkLabel(
             title_row,
             text=f"共 {len(versions)} 个",
@@ -319,6 +325,93 @@ class DetailPanel(ctk.CTkFrame):
             anchor="w",
             wraplength=SPACING["panel_w"] - 84,
         ).pack(side="left", fill="x", expand=True)
+
+    def _extra_info_section(self, parent, extra_info: str) -> None:
+        """渲染额外信息节（等宽字体多行展示，只读）。"""
+        pad = SPACING["card_pad"]
+        outer = ctk.CTkFrame(
+            parent, fg_color=get_ctk_color("bg_card"),
+            corner_radius=SPACING["card_radius"],
+        )
+        outer.pack(fill="x", padx=pad, pady=(pad, 0))
+
+        ctk.CTkLabel(
+            outer, text="额外信息",
+            font=FONTS["label"],
+            text_color=get_ctk_color("text_secondary"),
+            anchor="w",
+        ).pack(fill="x", padx=pad, pady=(pad - 2, 0))
+        ctk.CTkFrame(outer, height=1,
+                     fg_color=get_ctk_color("separator")).pack(
+            fill="x", padx=pad, pady=(4, 0))
+
+        body = ctk.CTkTextbox(
+            outer, height=130,
+            font=FONTS["mono_sm"],
+            fg_color=get_ctk_color("bg_primary"),
+            text_color=get_ctk_color("text_primary"),
+            corner_radius=SPACING["btn_radius"],
+            wrap="word",
+            activate_scrollbars=True,
+        )
+        body.pack(fill="x", padx=pad, pady=(4, pad // 2))
+        body.insert("1.0", extra_info)
+        body.configure(state="disabled")
+
+    def _actions_row(self, parent, tool: ToolDefinition, result: ScanResult | None) -> None:
+        """渲染快捷操作按钮行：打开安装目录 / 复制本工具信息。"""
+        pad = SPACING["card_pad"]
+        has_dir = bool(result and result.install_dir and os.path.isdir(result.install_dir))
+        if not has_dir:
+            return
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=pad, pady=(pad, 0))
+
+        ctk.CTkButton(
+            row, text="打开安装目录",
+            font=FONTS["small"], height=30,
+            corner_radius=SPACING["btn_radius"],
+            fg_color=get_ctk_color("accent"),
+            text_color=get_ctk_color("text_on_accent"),
+            hover_color=get_ctk_color("accent_hover"),
+            command=lambda: self._open_dir(result.install_dir),
+        ).pack(side="left", expand=True, fill="x", padx=(0, 4))
+
+        copy_btn = ctk.CTkButton(
+            row, text="复制信息",
+            font=FONTS["small"], height=30,
+            corner_radius=SPACING["btn_radius"],
+            fg_color="transparent",
+            text_color=get_ctk_color("accent"),
+            hover_color=get_ctk_color("accent_subtle"),
+            border_width=1,
+            border_color=get_ctk_color("border"),
+            command=lambda: self._copy_tool_info(tool, result, copy_btn),
+        )
+        copy_btn.pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+    def _open_dir(self, dir_path: str) -> None:
+        try:
+            os.startfile(dir_path)  # Windows 资源管理器打开
+        except OSError:
+            pass
+
+    def _copy_tool_info(self, tool: ToolDefinition, result: ScanResult | None, btn: ctk.CTkButton) -> None:
+        lines = [tool.display_name]
+        if result:
+            if result.version:
+                lines.append(f"版本: {result.version}")
+            if result.executable_path:
+                lines.append(f"路径: {result.executable_path}")
+            if result.install_dir:
+                lines.append(f"安装目录: {result.install_dir}")
+        try:
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(lines))
+        except Exception:
+            pass
+        btn.configure(text="✓")
+        self.after(1500, lambda: btn.configure(text="复制信息"))
 
     def _cmd_row(self, parent, item: dict) -> None:
         pad = SPACING["card_pad"]

@@ -13,7 +13,7 @@ from core.registry import ScanResult, ToolDefinition, get_all_tools
 MAX_WORKERS = min(16, (os.cpu_count() or 4) * 4)
 MAX_CONFLICT_WORKERS = min(8, MAX_WORKERS)
 
-_CONFLICT_TOOL_TIMEOUT = 10  # 单工具多版本扫描总超时（秒）
+_CONFLICT_TOOL_TIMEOUT = 15  # 安全护栏；实际 10s 总超时由 conflict.detect_all_versions 强制（见 §九）
 
 
 class Scanner:

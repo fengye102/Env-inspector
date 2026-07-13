@@ -66,7 +66,11 @@ env_inspector/
 
 │   ├── registry.py            # 工具定义注册表（唯一数据源）
 
-│   └── conflict.py            # 版本冲突检测（新增）
+│   ├── conflict.py            # 版本冲突检测
+
+│   ├── exporter.py            # 扫描报告导出（JSON / HTML / 文本清单）
+
+│   └── health.py              # 环境健康检查（冲突 / PATH / 超时 / 缺失）
 
 │
 
@@ -81,6 +85,8 @@ env_inspector/
 │   ├── detail_panel.py        # 右侧详情面板（版本/路径/命令/冲突警告）
 
 │   ├── tool_card.py           # 单个工具卡片组件
+
+│   ├── health_banner.py       # 顶部健康提示横幅（内联展示，非弹窗）
 
 │   └── theme.py               # 颜色/字体/尺寸常量（唯一样式来源）
 
@@ -145,7 +151,7 @@ class ScanResult:
     error: str | None                # 检测失败原因
     scan_duration_ms: int            # 本次扫描耗时
     all_versions: list[VersionEntry] # 【新增】所有检测到的版本，见 4.3
-    has_conflict: bool               # 【新增】是否存在版本冲突（len(all_versions) > 1）
+    has_conflict: bool               # 【新增】是否存在版本冲突（见 §九：存在 2 个及以上不同版本）
 ```
 
 ### 4.3 版本条目（多版本支持）
@@ -400,22 +406,26 @@ pyinstaller ^
 - [x] 基础 GUI：卡片列表 + 扫描进度
 - [x] 详情面板：版本/路径/命令复制
 
-### Phase 2 — 路径 & 冲突检测（当前）
+### Phase 2 — 路径 & 冲突检测（已完成）✅
 
-- [ ] `ScanResult` 扩展：`executable_path`、`install_dir`、`all_versions`、`has_conflict`
-- [ ] `ToolDefinition` 扩展：`multi_version_paths`
-- [ ] `detector.py`：补充 `install_dir` 推断逻辑
-- [ ] `conflict.py`：多版本扫描 + 冲突检测
-- [ ] `detail_panel.py`：展示安装路径 + 冲突版本列表
-- [ ] `tool_card.py`：冲突状态 ⚠️ 展示
-- [ ] `home_frame.py`：冲突筛选 tab + 顶部冲突计数
-- [ ] `theme.py`：新增 `warning` 颜色
+- [x] `ScanResult` 扩展：`executable_path`、`install_dir`、`all_versions`、`has_conflict`
+- [x] `ToolDefinition` 扩展：`multi_version_paths`
+- [x] `detector.py`：补充 `install_dir` 推断逻辑
+- [x] `conflict.py`：多版本扫描 + 冲突检测（按版本号去重判断）
+- [x] `detail_panel.py`：展示安装路径 + 冲突版本列表
+- [x] `tool_card.py`：冲突状态 ⚠️ 展示
+- [x] `home_frame.py`：冲突筛选 tab + 顶部冲突计数
+- [x] `theme.py`：新增 `warning` 颜色
 
-### Phase 3 — 体验完善
+### Phase 3 — 体验完善（当前）
 
 - [ ] 搜索 + 分类过滤
 - [ ] 深色/浅色主题切换
 - [ ] 工具数量扩展至 60 种
+- [ ] **报告导出**：`exporter.py` 导出 JSON / HTML / 文本清单，顶栏「导出」按钮
+- [ ] **健康检查**：`health.py` 分析冲突 / PATH 失效 / 超时 / 缺失，`health_banner.py` 顶部内联横幅展示（禁止弹窗）
+- [ ] **深度信息**：`detail_panel.py` 展示 `extra_info`（pip 全局包、Docker 容器数等）
+- [ ] **快捷操作**：`detail_panel.py` 新增「打开安装目录」「复制环境清单」按钮
 
 ### Phase 4 — 发布
 
@@ -438,5 +448,36 @@ pyinstaller ^
 
 ---
 
-*最后更新：2026-06-29*
+## 十三、报告导出与健康检查规范（Phase 3）
+
+### 13.1 报告导出（`core/exporter.py`）
+
+纯函数模块，输入 `list[ScanResult]` 与 `dict[str, ToolDefinition]`，输出字符串，**不涉及任何 UI / 文件 IO**（写文件由调用方负责）。
+
+- `export_json(results, tools) -> str`：结构化 JSON，含 `scan_time`、`total`、`installed`、`conflicts` 计数与各工具详情（id/name/category/installed/version/executable_path/install_dir/has_conflict/all_versions/extra_info/error/scan_duration_ms）。
+- `export_html(results, tools) -> str`：自包含 HTML（内联 CSS，GitHub-Obsidian 风格，颜色取自 `theme.py` 常量而非硬编码），按类别分组的表格，冲突行与未安装行有视觉标记。
+- `export_text_manifest(results, tools) -> str`：纯文本环境清单，每行 `名称\t版本\t路径`，仅含已安装工具，便于复制分享。
+
+### 13.2 健康检查（`core/health.py`）
+
+纯分析模块，**禁止做跨工具版本兼容性判断**（见 §十二），仅基于本机可计算的事实。
+
+`HealthIssue` 数据结构：`severity`（`error`/`warning`/`info`）、`category`（`conflict`/`version`/`timeout`/`path`/`missing`）、`tool_id`、`title`、`detail`、`suggestion`。
+
+- `analyze(results, tools) -> list[HealthIssue]`：
+  - `conflict`：`has_conflict` 的工具，列出版本号，建议清理旧版本或调整 PATH 顺序；
+  - `version`：`installed=True` 但 `version=None`，建议检查版本命令；
+  - `timeout`：`error=="timeout"`，建议重试；
+  - `missing`：核心类别（lang/pkg/vcs）全部未安装，info 提示。
+- `analyze_path() -> list[HealthIssue]`：分析 `os.environ["PATH"]`，标记**重复条目**与**不存在的失效目录**（`tool_id="_path"`）。
+
+### 13.3 UI 接入规范
+
+- **导出**：顶栏「导出」按钮 → 调用 `tkinter.filedialog.asksaveasfilename` 选路径 → 写 JSON + HTML → 顶部 banner 提示「已导出」。
+- **健康检查**：扫描完成后由 `ui/health_banner.py` 在主界面顶部**内联展示**问题列表（禁止弹窗，见 §十二）；每条显示严重度图标 + 标题 + 建议，可折叠/收起。
+- **深度信息 / 快捷操作**：在 `detail_panel.py` 面板内新增区块，`extra_info` 用等宽字体多行展示；「打开安装目录」用 `os.startfile`，「复制环境清单」写剪贴板。
+
+---
+
+*最后更新：2026-07-14*
 *技术栈：Python 3.11 + CustomTkinter + PyInstaller*
