@@ -3,10 +3,14 @@
 from __future__ import annotations
 import ctypes, os, sys
 import customtkinter as ctk
+from tkinter import filedialog
 
-from core.registry import ScanResult, ToolDefinition, get_tool
+from core.registry import ScanResult, ToolDefinition, get_all_tools, get_tool
 from core.scanner import Scanner
+from core.exporter import export_json, export_html
+from core.health import analyze, analyze_path
 from ui.detail_panel import DetailPanel
+from ui.health_banner import HealthBanner
 from ui.home_frame import HomeFrame
 from ui.theme import FONTS, SPACING, get_ctk_color
 
@@ -45,11 +49,13 @@ class App(ctk.CTk):
     def _build_ui(self) -> None:
         self.grid_rowconfigure(0, weight=0)  # topbar
         self.grid_rowconfigure(1, weight=0)  # progress
-        self.grid_rowconfigure(2, weight=1)  # content
+        self.grid_rowconfigure(2, weight=0)  # health banner
+        self.grid_rowconfigure(3, weight=1)  # content
         self.grid_columnconfigure(0, weight=1)
 
         self._build_topbar()
         self._build_progress()
+        self._build_health_banner()
         self._build_content()
 
     def _build_topbar(self) -> None:
@@ -119,6 +125,23 @@ class App(ctk.CTk):
         )
         self._refresh_btn.pack(side="right", padx=(0, 6))
 
+        # 导出按钮
+        self._export_btn = ctk.CTkButton(
+            right,
+            text="⤓  导出",
+            font=FONTS["body"],
+            width=82, height=32,
+            corner_radius=SPACING["btn_radius"],
+            fg_color="transparent",
+            text_color=get_ctk_color("text_secondary"),
+            hover_color=get_ctk_color("bg_card_hover"),
+            border_width=1,
+            border_color=get_ctk_color("border"),
+            command=self._export_report,
+            state="disabled",
+        )
+        self._export_btn.pack(side="right", padx=(0, 6))
+
         # 统计数字
         self._stats_label = ctk.CTkLabel(
             right,
@@ -158,9 +181,15 @@ class App(ctk.CTk):
 
         self._prog_frame.grid_remove()
 
+    def _build_health_banner(self) -> None:
+        self._health_banner = HealthBanner(self)
+        # 默认不显示，扫描完成后由 _update_health_banner 决定
+        self._health_banner.grid(row=2, column=0, sticky="ew")
+        self._health_banner.grid_remove()
+
     def _build_content(self) -> None:
         content = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        content.grid(row=2, column=0, sticky="nsew")
+        content.grid(row=3, column=0, sticky="nsew")
         content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=1)
         content.grid_columnconfigure(1, weight=0, minsize=SPACING["panel_w"])
@@ -185,8 +214,10 @@ class App(ctk.CTk):
         self._scan_results = {}
         self._stats_label.configure(text="正在扫描...")
         self._refresh_btn.configure(state="disabled")
+        self._export_btn.configure(state="disabled")
         self._prog_bar.set(0)
         self._prog_frame.grid()
+        self._health_banner.hide()
 
         self._scanner = Scanner(
             on_progress=self._on_progress,
@@ -225,7 +256,9 @@ class App(ctk.CTk):
             self._stats_label.configure(text=f"已安装  {n_installed} / {total}")
 
         self._refresh_btn.configure(state="normal")
+        self._export_btn.configure(state="normal")
         self._prog_frame.grid_remove()
+        self._update_health_banner()
 
     def _on_error(self, msg: str) -> None:
         self.after(0, lambda: self._ui_error(msg))
@@ -254,6 +287,54 @@ class App(ctk.CTk):
             self._stats_label.configure(
                 text=f"已安装 {installed}/{total}  ⚠ {n_conflict} 冲突"
             )
+
+        # 冲突状态变化后刷新健康横幅
+        self._update_health_banner()
+
+    # ── 健康检查 / 导出 ───────────────────────────────────
+
+    def _update_health_banner(self) -> None:
+        """基于当前扫描结果与 PATH 重新计算健康问题并刷新横幅。"""
+        if not self._scan_results:
+            self._health_banner.hide()
+            return
+        tools_dict = {t.id: t for t in get_all_tools()}
+        results_list = list(self._scan_results.values())
+        issues = analyze(results_list, tools_dict) + analyze_path()
+        self._health_banner.update_issues(issues)
+
+    def _export_report(self) -> None:
+        """导出 JSON + HTML 报告到用户选择的路径。"""
+        if not self._scan_results:
+            return
+        tools_dict = {t.id: t for t in get_all_tools()}
+        results_list = list(self._scan_results.values())
+
+        path = filedialog.asksaveasfilename(
+            title="导出扫描报告",
+            defaultextension=".html",
+            filetypes=[
+                ("HTML 报告", "*.html"),
+                ("JSON 数据", "*.json"),
+                ("所有文件", "*.*"),
+            ],
+            initialfile="env_inspector_report.html",
+        )
+        if not path:
+            return
+
+        try:
+            # 始终同时输出 HTML 与 JSON，便于查看与二次处理
+            base, _ = os.path.splitext(path)
+            html_path = base + ".html"
+            json_path = base + ".json"
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(export_html(results_list, tools_dict))
+            with open(json_path, "w", encoding="utf-8") as f:
+                f.write(export_json(results_list, tools_dict))
+            self._stats_label.configure(text=f"已导出 {os.path.basename(html_path)}")
+        except OSError as e:
+            self._stats_label.configure(text=f"导出失败: {str(e)[:24]}")
 
     # ── 卡片点击 / 主题 ──────────────────────────────────
 

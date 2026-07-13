@@ -419,13 +419,13 @@ pyinstaller ^
 
 ### Phase 3 — 体验完善（当前）
 
-- [ ] 搜索 + 分类过滤
-- [ ] 深色/浅色主题切换
+- [x] 搜索 + 分类过滤
+- [x] 深色/浅色主题切换
 - [ ] 工具数量扩展至 60 种
-- [ ] **报告导出**：`exporter.py` 导出 JSON / HTML / 文本清单，顶栏「导出」按钮
-- [ ] **健康检查**：`health.py` 分析冲突 / PATH 失效 / 超时 / 缺失，`health_banner.py` 顶部内联横幅展示（禁止弹窗）
-- [ ] **深度信息**：`detail_panel.py` 展示 `extra_info`（pip 全局包、Docker 容器数等）
-- [ ] **快捷操作**：`detail_panel.py` 新增「打开安装目录」「复制环境清单」按钮
+- [x] **报告导出**：`exporter.py` 导出 JSON / HTML / 文本清单，顶栏「导出」按钮
+- [x] **健康检查**：`health.py` 分析冲突 / PATH 失效 / 超时 / 缺失，`health_banner.py` 顶部内联横幅展示（禁止弹窗）
+- [x] **深度信息**：`detail_panel.py` 展示 `extra_info`（pip 全局包、Docker 容器数等）
+- [x] **快捷操作**：`detail_panel.py` 新增「打开安装目录」「复制本工具信息」按钮
 
 ### Phase 4 — 发布
 
@@ -475,7 +475,7 @@ pyinstaller ^
 
 - **导出**：顶栏「导出」按钮 → 调用 `tkinter.filedialog.asksaveasfilename` 选路径 → 写 JSON + HTML → 顶部 banner 提示「已导出」。
 - **健康检查**：扫描完成后由 `ui/health_banner.py` 在主界面顶部**内联展示**问题列表（禁止弹窗，见 §十二）；每条显示严重度图标 + 标题 + 建议，可折叠/收起。
-- **深度信息 / 快捷操作**：在 `detail_panel.py` 面板内新增区块，`extra_info` 用等宽字体多行展示；「打开安装目录」用 `os.startfile`，「复制环境清单」写剪贴板。
+- **深度信息 / 快捷操作**：在 `detail_panel.py` 面板内新增区块，`extra_info` 用等宽字体多行展示；「打开安装目录」用 `os.startfile`，「复制本工具信息」写剪贴板（仅当前工具的名称/版本/路径）。
 
 ---
 
